@@ -1,0 +1,510 @@
+// models/Food.js
+const mongoose = require('mongoose');
+
+const FoodSchema = new mongoose.Schema({
+    name: {
+        type: String,
+        required: true,
+        trim: true
+    },
+    description: {
+        type: String,
+        required: true,
+        trim: true
+    },
+    price: {
+        type: Number,
+        required: true,
+        min: 0
+    },
+    category: {
+        type: String,
+        required: true,
+        trim: true
+    },
+    image: {
+        type: String,
+        required: true
+    },
+    isAvailable: {
+        type: Boolean,
+        default: true
+    }
+}, { timestamps: true });
+
+module.exports = mongoose.model('Food', FoodSchema);
+
+// models/Order.js
+const mongoose = require('mongoose');
+
+const OrderSchema = new mongoose.Schema({
+    user: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        required: true
+    },
+    items: [{
+        food: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Food',
+            required: true
+        },
+        quantity: {
+            type: Number,
+            required: true,
+            min: 1
+        },
+        price: {
+            type: Number,
+            required: true
+        }
+    }],
+    totalAmount: {
+        type: Number,
+        required: true
+    },
+    status: {
+        type: String,
+        enum: ['pending', 'confirmed', 'preparing', 'ready', 'delivered', 'cancelled'],
+        default: 'pending'
+    },
+    deliveryAddress: {
+        type: String,
+        required: true
+    },
+    contactNumber: {
+        type: String,
+        required: true
+    }
+}, { timestamps: true });
+
+module.exports = mongoose.model('Order', OrderSchema);
+
+// models/User.js
+const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
+
+const UserSchema = new mongoose.Schema({
+    name: {
+        type: String,
+        required: true,
+        trim: true
+    },
+    email: {
+        type: String,
+        required: true,
+        unique: true,
+        trim: true,
+        lowercase: true
+    },
+    password: {
+        type: String,
+        required: true
+    },
+    role: {
+        type: String,
+        enum: ['user', 'admin'],
+        default: 'user'
+    },
+    phone: {
+        type: String,
+        required: true
+    }
+}, { timestamps: true });
+
+UserSchema.pre('save', async function(next) {
+    if (!this.isModified('password')) return next();
+    this.password = await bcrypt.hash(this.password, 10);
+    next();
+});
+
+UserSchema.methods.comparePassword = async function(candidatePassword) {
+    return await bcrypt.compare(candidatePassword, this.password);
+};
+
+module.exports = mongoose.model('User', UserSchema);
+
+// routes/foodRoutes.js
+const express = require('express');
+const router = express.Router();
+const Food = require('../models/Food');
+const auth = require('../middleware/auth');
+const adminAuth = require('../middleware/adminAuth');
+
+// Get all food items
+router.get('/', async (req, res) => {
+    try {
+        const foods = await Food.find();
+        res.json(foods);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
+// Get food by ID
+router.get('/:id', async (req, res) => {
+    try {
+        const food = await Food.findById(req.params.id);
+        if (!food) return res.status(404).json({ message: 'Food not found' });
+        res.json(food);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
+// Add new food (admin only)
+router.post('/', auth, adminAuth, async (req, res) => {
+    const food = new Food(req.body);
+    try {
+        const newFood = await food.save();
+        res.status(201).json(newFood);
+    } catch (error) {
+        res.status(400).json({ message: error.message });
+    }
+});
+
+// Delete food (admin only)
+router.delete('/:id', auth, adminAuth, async (req, res) => {
+    try {
+        const food = await Food.findByIdAndDelete(req.params.id);
+        if (!food) return res.status(404).json({ message: 'Food not found' });
+        res.json({ message: 'Food deleted successfully' });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
+module.exports = router;
+
+// routes/orderRoutes.js
+const express = require('express');
+const router = express.Router();
+const Order = require('../models/Order');
+const auth = require('../middleware/auth');
+const adminAuth = require('../middleware/adminAuth');
+
+// Place new order
+router.post('/', auth, async (req, res) => {
+    const order = new Order({
+        ...req.body,
+        user: req.user._id
+    });
+    try {
+        const newOrder = await order.save();
+        res.status(201).json(newOrder);
+    } catch (error) {
+        res.status(400).json({ message: error.message });
+    }
+});
+
+// Get all orders (admin only)
+router.get('/', auth, adminAuth, async (req, res) => {
+    try {
+        const orders = await Order.find().populate('user').populate('items.food');
+        res.json(orders);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
+// Get user's orders
+router.get('/my-orders', auth, async (req, res) => {
+    try {
+        const orders = await Order.find({ user: req.user._id }).populate('items.food');
+        res.json(orders);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
+// Get order by ID
+router.get('/:id', auth, async (req, res) => {
+    try {
+        const order = await Order.findById(req.params.id).populate('items.food');
+        if (!order) return res.status(404).json({ message: 'Order not found' });
+        if (req.user.role !== 'admin' && order.user.toString() !== req.user._id.toString()) {
+            return res.status(403).json({ message: 'Not authorized' });
+        }
+        res.json(order);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
+// Update order status (admin only)
+router.patch('/:id/status', auth, adminAuth, async (req, res) => {
+    try {
+        const order = await Order.findByIdAndUpdate(
+            req.params.id,
+            { status: req.body.status },
+            { new: true }
+        );
+        if (!order) return res.status(404).json({ message: 'Order not found' });
+        res.json(order);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
+module.exports = router;
+
+// routes/userRoutes.js
+const express = require('express');
+const router = express.Router();
+const User = require('../models/User');
+const jwt = require('jsonwebtoken');
+const auth = require('../middleware/auth');
+const adminAuth = require('../middleware/adminAuth');
+
+// User signup
+router.post('/signup', async (req, res) => {
+    try {
+        const user = new User(req.body);
+        await user.save();
+        const token = jwt.sign({ _id: user._id }, process.env.JWT_SECRET);
+        res.status(201).json({ user, token });
+    } catch (error) {
+        res.status(400).json({ message: error.message });
+    }
+});
+
+// User signin
+router.post('/signin', async (req, res) => {
+    try {
+        const user = await User.findOne({ email: req.body.email });
+        if (!user) return res.status(401).json({ message: 'Invalid credentials' });
+        
+        const isMatch = await user.comparePassword(req.body.password);
+        if (!isMatch) return res.status(401).json({ message: 'Invalid credentials' });
+        
+        const token = jwt.sign({ _id: user._id }, process.env.JWT_SECRET);
+        res.json({ user, token });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
+// Get all users (admin only)
+router.get('/', auth, adminAuth, async (req, res) => {
+    try {
+        const users = await User.find().select('-password');
+        res.json(users);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
+// Get user profile
+router.get('/profile', auth, async (req, res) => {
+    res.json(req.user);
+});
+
+module.exports = router;
+
+// middleware/auth.js
+const jwt = require('jsonwebtoken');
+const User = require('../models/User');
+
+const auth = async (req, res, next) => {
+    try {
+        const token = req.header('Authorization').replace('Bearer ', '');
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const user = await User.findById(decoded._id).select('-password');
+        
+        if (!user) throw new Error();
+        
+        req.token = token;
+        req.user = user;
+        next();
+    } catch (error) {
+        res.status(401).json({ message: 'Please authenticate' });
+    }
+};
+
+module.exports = auth;
+
+// middleware/adminAuth.js
+const adminAuth = async (req, res, next) => {
+    if (req.user.role !== 'admin') {
+        return res.status(403).json({ message: 'Admin access required' });
+    }
+    next();
+};
+
+module.exports = adminAuth;
+
+// db.js
+const mongoose = require('mongoose');
+
+const connectDB = async () => {
+    try {
+        await mongoose.connect(process.env.MONGODB_URI, {
+            useNewUrlParser: true,
+            useUnifiedTopology: true
+        });
+        console.log('MongoDB connected successfully');
+    } catch (error) {
+        console.error('MongoDB connection error:', error.message);
+        process.exit(1);
+    }
+};
+
+module.exports = connectDB;
+
+// index.js
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+const connectDB = require('./db');
+const foodRoutes = require('./routes/foodRoutes');
+const orderRoutes = require('./routes/orderRoutes');
+const userRoutes = require('./routes/userRoutes');
+const paymentRoutes = require('./routes/paymentRoutes');
+const searchRoutes = require('./routes/searchRoutes');
+
+
+const app = express();
+
+// Connect to MongoDB
+connectDB();
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+
+// Routes
+app.use('/api/payments', paymentRoutes);
+app.use('/api/search', searchRoutes);
+app.use('/api/foods', foodRoutes);
+app.use('/api/orders', orderRoutes);
+app.use('/api/users', userRoutes);
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+    console.error(err.stack);
+    res.status(500).json({ message: 'Something went wrong!' });
+});
+
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
+});
+
+// .env
+PORT=5000
+MONGODB_URI=mongodb://localhost:27017/restaurant
+JWT_SECRET=VyasVishal
+STRIPE_SECRET_KEY=your_stripe_secret_key
+
+
+
+// models/Payment.js
+const mongoose = require('mongoose');
+
+const PaymentSchema = new mongoose.Schema({
+    order: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Order',
+        required: true
+    },
+    amount: {
+        type: Number,
+        required: true
+    },
+    paymentMethod: {
+        type: String,
+        enum: ['card', 'cash', 'upi'],
+        required: true
+    },
+    status: {
+        type: String,
+        enum: ['pending', 'completed', 'failed'],
+        default: 'pending'
+    },
+    transactionId: {
+        type: String
+    }
+}, { timestamps: true });
+
+module.exports = mongoose.model('Payment', PaymentSchema);
+
+
+
+
+// routes/paymentRoutes.js
+const express = require('express');
+const router = express.Router();
+const Payment = require('../models/Payment');
+const auth = require('../middleware/auth');
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+
+// Initialize payment
+router.post('/create-payment-intent', auth, async (req, res) => {
+    try {
+        const { amount, orderId } = req.body;
+
+        const paymentIntent = await stripe.paymentIntents.create({
+            amount: amount * 100, // Convert to cents
+            currency: 'inr',
+            metadata: { orderId }
+        });
+
+        res.json({ clientSecret: paymentIntent.client_secret });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
+// Record payment
+router.post('/record', auth, async (req, res) => {
+    try {
+        const payment = new Payment({
+            ...req.body,
+            status: 'completed'
+        });
+        await payment.save();
+        res.status(201).json(payment);
+    } catch (error) {
+        res.status(400).json({ message: error.message });
+    }
+});
+
+module.exports = router;
+
+// routes/searchRoutes.js
+const express = require('express');
+const router = express.Router();
+const Food = require('../models/Food');
+
+// Search foods
+router.get('/foods', async (req, res) => {
+    try {
+        const { query, category, minPrice, maxPrice } = req.query;
+        
+        let filter = {};
+        
+        if (query) {
+            filter.$or = [
+                { name: { $regex: query, $options: 'i' } },
+                { description: { $regex: query, $options: 'i' } }
+            ];
+        }
+        
+        if (category) {
+            filter.category = category;
+        }
+        
+        if (minPrice || maxPrice) {
+            filter.price = {};
+            if (minPrice) filter.price.$gte = Number(minPrice);
+            if (maxPrice) filter.price.$lte = Number(maxPrice);
+        }
+        
+        const foods = await Food.find(filter);
+        res.json(foods);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
+module.exports = router;

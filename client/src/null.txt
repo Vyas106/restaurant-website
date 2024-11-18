@@ -1,0 +1,1177 @@
+// src/App.jsx
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { Toaster } from 'react-hot-toast';
+import Navbar from './components/Navbar';
+import Home from './pages/Home';
+import Menu from './pages/Menu';
+import Cart from './pages/Cart';
+import Login from './pages/Login';
+import Register from './pages/Register';
+import Orders from './pages/Orders';
+import AdminDashboard from './pages/AdminDashboard';
+import { AuthProvider } from './context/AuthContext';
+import { CartProvider } from './context/CartContext';
+import PrivateRoute from './components/PrivateRoute';
+import AdminRoute from './components/AdminRoute';
+
+const App = () => {
+  return (
+    <Router>
+      <AuthProvider>
+        <CartProvider>
+          <div className="min-h-screen bg-gray-100">
+            <Navbar />
+            <div className="container mx-auto px-4 py-8">
+              <Routes>
+                <Route path="/" element={<Home />} />
+                <Route path="/menu" element={<Menu />} />
+                <Route path="/cart" element={<Cart />} />
+                <Route path="/login" element={<Login />} />
+                <Route path="/register" element={<Register />} />
+                <Route path="/orders" element={<PrivateRoute><Orders /></PrivateRoute>} />
+                <Route path="/admin" element={<AdminRoute><AdminDashboard /></AdminRoute>} />
+              </Routes>
+            </div>
+            <Toaster position="top-right" />
+          </div>
+        </CartProvider>
+      </AuthProvider>
+    </Router>
+  );
+};
+
+export default App;
+
+// src/api/axios.js
+import axios from 'axios';
+
+const api = axios.create({
+  baseURL: 'http://localhost:5000/api',
+});
+
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+export default api;
+
+// src/context/AuthContext.jsx
+import React, { createContext, useState, useContext, useEffect } from 'react';
+import api from '../api/axios';
+
+const AuthContext = createContext(null);
+
+export const AuthProvider = ({ children }) => {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      api.get('/users/profile')
+        .then(res => setUser(res.data))
+        .catch(() => localStorage.removeItem('token'))
+        .finally(() => setLoading(false));
+    } else {
+      setLoading(false);
+    }
+  }, []);
+
+  const login = async (credentials) => {
+    const res = await api.post('/users/signin', credentials);
+    localStorage.setItem('token', res.data.token);
+    setUser(res.data.user);
+  };
+
+  const register = async (userData) => {
+    const res = await api.post('/users/signup', userData);
+    localStorage.setItem('token', res.data.token);
+    setUser(res.data.user);
+  };
+
+  const logout = () => {
+    localStorage.removeItem('token');
+    setUser(null);
+  };
+
+  return (
+    <AuthContext.Provider value={{ user, login, register, logout, loading }}>
+      {children}
+    </AuthContext.Provider>
+  );
+};
+
+export const useAuth = () => useContext(AuthContext);
+
+// src/context/CartContext.jsx
+import React, { createContext, useState, useContext } from 'react';
+
+const CartContext = createContext(null);
+
+export const CartProvider = ({ children }) => {
+  const [cart, setCart] = useState([]);
+
+  const addToCart = (food) => {
+    setCart(prev => {
+      const existing = prev.find(item => item.food._id === food._id);
+      if (existing) {
+        return prev.map(item =>
+          item.food._id === food._id
+            ? { ...item, quantity: item.quantity + 1 }
+            : item
+        );
+      }
+      return [...prev, { food, quantity: 1 }];
+    });
+  };
+
+  const removeFromCart = (foodId) => {
+    setCart(prev => prev.filter(item => item.food._id !== foodId));
+  };
+
+  const updateQuantity = (foodId, quantity) => {
+    setCart(prev =>
+      prev.map(item =>
+        item.food._id === foodId
+          ? { ...item, quantity: Math.max(0, quantity) }
+          : item
+      ).filter(item => item.quantity > 0)
+    );
+  };
+
+  const clearCart = () => setCart([]);
+
+  const total = cart.reduce((sum, item) => sum + item.food.price * item.quantity, 0);
+
+  return (
+    <CartContext.Provider value={{ cart, addToCart, removeFromCart, updateQuantity, clearCart, total }}>
+      {children}
+    </CartContext.Provider>
+  );
+};
+
+export const useCart = () => useContext(CartContext);
+
+// src/components/Navbar.jsx
+import React from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { FiShoppingCart, FiUser, FiLogOut } from 'react-icons/fi';
+import { useAuth } from '../context/AuthContext';
+import { useCart } from '../context/CartContext';
+
+const Navbar = () => {
+  const { user, logout } = useAuth();
+  const { cart } = useCart();
+  const navigate = useNavigate();
+
+  return (
+    <nav className="bg-white shadow-md">
+      <div className="container mx-auto px-4">
+        <div className="flex justify-between items-center h-16">
+          <Link to="/" className="text-xl font-bold">
+            Restaurant App
+          </Link>
+          
+          <div className="flex items-center gap-4">
+            <Link to="/menu" className="hover:text-gray-600">
+              Menu
+            </Link>
+            
+            {user ? (
+              <>
+                <Link to="/orders" className="hover:text-gray-600">
+                  Orders
+                </Link>
+                {user.role === 'admin' && (
+                  <Link to="/admin" className="hover:text-gray-600">
+                    Admin
+                  </Link>
+                )}
+                <Link to="/cart" className="relative hover:text-gray-600">
+                  <FiShoppingCart size={20} />
+                  {cart.length > 0 && (
+                    <span className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs">
+                      {cart.length}
+                    </span>
+                  )}
+                </Link>
+                <button
+                  onClick={() => {
+                    logout();
+                    navigate('/login');
+                  }}
+                  className="hover:text-gray-600"
+                >
+                  <FiLogOut size={20} />
+                </button>
+              </>
+            ) : (
+              <Link to="/login" className="hover:text-gray-600">
+                <FiUser size={20} />
+              </Link>
+            )}
+          </div>
+        </div>
+      </div>
+    </nav>
+  );
+};
+
+export default Navbar;
+
+// src/pages/Login.jsx
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { toast } from 'react-hot-toast';
+import { useAuth } from '../context/AuthContext';
+
+const Login = () => {
+  const [credentials, setCredentials] = useState({ email: '', password: '' });
+  const { login } = useAuth();
+  const navigate = useNavigate();
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      await login(credentials);
+      toast.success('Logged in successfully');
+      navigate('/');
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Login failed');
+    }
+  };
+
+  return (
+    <div className="max-w-md mx-auto bg-white p-8 rounded shadow">
+      <h2 className="text-2xl font-bold mb-6">Login</h2>
+      <form onSubmit={handleSubmit}>
+        <div className="mb-4">
+          <label className="block mb-2">Email</label>
+          <input
+            type="email"
+            className="w-full p-2 border rounded"
+            value={credentials.email}
+            onChange={(e) => setCredentials({ ...credentials, email: e.target.value })}
+            required
+          />
+        </div>
+        <div className="mb-4">
+          <label className="block mb-2">Password</label>
+          <input
+            type="password"
+            className="w-full p-2 border rounded"
+            value={credentials.password}
+            onChange={(e) => setCredentials({ ...credentials, password: e.target.value })}
+            required
+          />
+        </div>
+        <button
+          type="submit"
+          className="w-full bg-blue-500 text-white p-2 rounded hover:bg-blue-600"
+        >
+          Login
+        </button>
+      </form>
+    </div>
+  );
+};
+
+export default Login;
+
+// src/pages/Menu.jsx
+import React, { useState, useEffect } from 'react';
+import { toast } from 'react-hot-toast';
+import { FiPlusCircle } from 'react-icons/fi';
+import api from '../api/axios';
+import { useCart } from '../context/CartContext';
+
+const Menu = () => {
+  const [foods, setFoods] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const { addToCart } = useCart();
+
+  useEffect(() => {
+    const fetchFoods = async () => {
+      try {
+        const res = await api.get('/foods');
+        setFoods(res.data);
+      } catch (error) {
+        toast.error('Failed to fetch menu');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchFoods();
+  }, []);
+
+  if (loading) return <div>Loading...</div>;
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      {foods.map((food) => (
+        <div key={food._id} className="bg-white p-4 rounded shadow">
+          <img
+            src={food.image}
+            alt={food.name}
+            className="w-full h-48 object-cover rounded mb-4"
+          />
+          <h3 className="text-xl font-bold mb-2">{food.name}</h3>
+          <p className="text-gray-600 mb-2">{food.description}</p>
+          <div className="flex justify-between items-center">
+            <span className="text-lg font-bold">₹{food.price}</span>
+            <button
+              onClick={() => {
+                addToCart(food);
+                toast.success('Added to cart');
+              }}
+              className="flex items-center gap-2 bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+            >
+              <FiPlusCircle /> Add to Cart
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+export default Menu;
+
+// src/pages/Cart.jsx
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { toast } from 'react-hot-toast';
+import { FiMinus, FiPlus, FiTrash2 } from 'react-icons/fi';
+import { useCart } from '../context/CartContext';
+import { useAuth } from '../context/AuthContext';
+import api from '../api/axios';
+
+const Cart = () => {
+  const { cart, removeFromCart, updateQuantity, total, clearCart } = useCart();
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const [loading, setLoading] = useState(false);
+  const [address, setAddress] = useState('');
+  const [contactNumber, setContactNumber] = useState('');
+
+  const handleCheckout = async () => {
+    if (!user) {
+      toast.error('Please login to place order');
+      navigate('/login');
+      return;
+    }
+
+    if (!address || !contactNumber) {
+      toast.error('Please fill in delivery details');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const orderData = {
+        items: cart.map(item => ({
+          food: item.food._id,
+          quantity: item.quantity,
+          price: item.food.price
+        })),
+        totalAmount: total,
+        deliveryAddress: address,
+        contactNumber
+      };
+
+      await api.post('/orders', orderData);
+      clearCart();
+      toast.success('Order placed successfully');
+      navigate('/orders');
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to place order');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (cart.length === 0) {
+    return (
+      <div className="text-center py-8">
+        <h2 className="text-2xl font-bold mb-4">Your cart is empty</h2>
+        <button
+          onClick={() => navigate('/menu')}
+          className="bg-blue-500 text-white px-6 py-2 rounded hover:bg-blue-600"
+        >
+          Browse Menu
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-2xl mx-auto">
+      <h2 className="text-2xl font-bold mb-6">Your Cart</h2>
+      
+      <div className="bg-white rounded shadow p-6 mb-6">
+        {cart.map((item) => (
+          <div key={item.food._id} className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="font-bold">{item.food.name}</h3>
+              <p className="text-gray-600">₹{item.food.price} × {item.quantity}</p>
+            </div>
+            
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => updateQuantity(item.food._id, item.quantity - 1)}
+                  className="p-1 hover:bg-gray-100 rounded"
+                >
+                  <FiMinus />
+                </button>
+                <span>{item.quantity}</span>
+                <button
+                  onClick={() => updateQuantity(item.food._id, item.quantity + 1)}
+                  className="p-1 hover:bg-gray-100 rounded"
+                >
+                  <FiPlus />
+                </button>
+              </div>
+              
+              <button
+                onClick={() => removeFromCart(item.food._id)}
+                className="text-red-500 hover:text-red-600"
+              >
+                <FiTrash2 size={20} />
+              </button>
+            </div>
+          </div>
+        ))}
+        
+        <div className="border-t pt-4 mt-4">
+          <div className="text-xl font-bold">Total: ₹{total}</div>
+
+          // Continuing src/pages/Cart.jsx
+          <div className="mt-6">
+            <h3 className="font-bold mb-4">Delivery Details</h3>
+            <div className="mb-4">
+              <label className="block mb-2">Delivery Address</label>
+              <textarea
+                className="w-full p-2 border rounded"
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                required
+              />
+            </div>
+            <div className="mb-4">
+              <label className="block mb-2">Contact Number</label>
+              <input
+                type="tel"
+                className="w-full p-2 border rounded"
+                value={contactNumber}
+                onChange={(e) => setContactNumber(e.target.value)}
+                required
+              />
+            </div>
+          </div>
+          
+          <button
+            onClick={handleCheckout}
+            disabled={loading}
+            className="w-full bg-blue-500 text-white p-3 rounded hover:bg-blue-600 disabled:bg-gray-400"
+          >
+            {loading ? 'Processing...' : 'Place Order'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default Cart;
+
+// src/pages/Register.jsx
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { toast } from 'react-hot-toast';
+import { useAuth } from '../context/AuthContext';
+
+const Register = () => {
+  const [userData, setUserData] = useState({
+    name: '',
+    email: '',
+    password: '',
+    phone: ''
+  });
+  const { register } = useAuth();
+  const navigate = useNavigate();
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      await register(userData);
+      toast.success('Registration successful');
+      navigate('/');
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Registration failed');
+    }
+  };
+
+  return (
+    <div className="max-w-md mx-auto bg-white p-8 rounded shadow">
+      <h2 className="text-2xl font-bold mb-6">Register</h2>
+      <form onSubmit={handleSubmit}>
+        <div className="mb-4">
+          <label className="block mb-2">Name</label>
+          <input
+            type="text"
+            className="w-full p-2 border rounded"
+            value={userData.name}
+            onChange={(e) => setUserData({ ...userData, name: e.target.value })}
+            required
+          />
+        </div>
+        <div className="mb-4">
+          <label className="block mb-2">Email</label>
+          <input
+            type="email"
+            className="w-full p-2 border rounded"
+            value={userData.email}
+            onChange={(e) => setUserData({ ...userData, email: e.target.value })}
+            required
+          />
+        </div>
+        <div className="mb-4">
+          <label className="block mb-2">Password</label>
+          <input
+            type="password"
+            className="w-full p-2 border rounded"
+            value={userData.password}
+            onChange={(e) => setUserData({ ...userData, password: e.target.value })}
+            required
+          />
+        </div>
+        <div className="mb-4">
+          <label className="block mb-2">Phone</label>
+          <input
+            type="tel"
+            className="w-full p-2 border rounded"
+            value={userData.phone}
+            onChange={(e) => setUserData({ ...userData, phone: e.target.value })}
+            required
+          />
+        </div>
+        <button
+          type="submit"
+          className="w-full bg-blue-500 text-white p-2 rounded hover:bg-blue-600"
+        >
+          Register
+        </button>
+      </form>
+    </div>
+  );
+};
+
+export default Register;
+
+// src/pages/Orders.jsx
+import React, { useState, useEffect } from 'react';
+import { toast } from 'react-hot-toast';
+import api from '../api/axios';
+
+const Orders = () => {
+  const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchOrders = async () => {
+      try {
+        const res = await api.get('/orders/my-orders');
+        setOrders(res.data);
+      } catch (error) {
+        toast.error('Failed to fetch orders');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchOrders();
+  }, []);
+
+  if (loading) return <div>Loading...</div>;
+
+  return (
+    <div className="max-w-4xl mx-auto">
+      <h2 className="text-2xl font-bold mb-6">My Orders</h2>
+      
+      {orders.length === 0 ? (
+        <div className="text-center py-8">
+          <p>No orders found</p>
+        </div>
+      ) : (
+        <div className="space-y-6">
+          {orders.map((order) => (
+            <div key={order._id} className="bg-white p-6 rounded shadow">
+              <div className="flex justify-between items-start mb-4">
+                <div>
+                  <p className="text-sm text-gray-600">
+                    Order ID: {order._id}
+                  </p>
+                  <p className="text-sm text-gray-600">
+                    Date: {new Date(order.createdAt).toLocaleDateString()}
+                  </p>
+                </div>
+                <span className={`px-3 py-1 rounded text-sm ${
+                  order.status === 'delivered' ? 'bg-green-100 text-green-800' :
+                  order.status === 'cancelled' ? 'bg-red-100 text-red-800' :
+                  'bg-blue-100 text-blue-800'
+                }`}>
+                  {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
+                </span>
+              </div>
+              
+              <div className="border-t pt-4">
+                <h3 className="font-bold mb-2">Items</h3>
+                {order.items.map((item) => (
+                  <div key={item._id} className="flex justify-between items-center mb-2">
+                    <div>
+                      <p className="font-medium">{item.food.name}</p>
+                      <p className="text-sm text-gray-600">
+                        Quantity: {item.quantity}
+                      </p>
+                    </div>
+                    <p>₹{item.price * item.quantity}</p>
+                  </div>
+                ))}
+              </div>
+              
+              <div className="border-t pt-4 mt-4">
+                <div className="flex justify-between items-center">
+                  <p className="font-bold">Total Amount</p>
+                  <p className="font-bold">₹{order.totalAmount}</p>
+                </div>
+                <p className="mt-2 text-sm text-gray-600">
+                  Delivery Address: {order.deliveryAddress}
+                </p>
+                <p className="text-sm text-gray-600">
+                  Contact: {order.contactNumber}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default Orders;
+
+// src/pages/AdminDashboard.jsx
+import React, { useState, useEffect } from 'react';
+import { toast } from 'react-hot-toast';
+import { FiEdit2, FiTrash2 } from 'react-icons/fi';
+import api from '../api/axios';
+
+const AdminDashboard = () => {
+  const [activeTab, setActiveTab] = useState('orders');
+  const [orders, setOrders] = useState([]);
+  const [foods, setFoods] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  
+  const [newFood, setNewFood] = useState({
+    name: '',
+    description: '',
+    price: '',
+    category: '',
+    image: ''
+  });
+
+  useEffect(() => {
+    fetchData();
+  }, [activeTab]);
+
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      let res;
+      switch (activeTab) {
+        case 'orders':
+          res = await api.get('/orders');
+          setOrders(res.data);
+          break;
+        case 'foods':
+          res = await api.get('/foods');
+          setFoods(res.data);
+          break;
+        case 'users':
+          res = await api.get('/users');
+          setUsers(res.data);
+          break;
+      }
+    } catch (error) {
+      toast.error('Failed to fetch data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const updateOrderStatus = async (orderId, status) => {
+    try {
+      await api.patch(`/orders/${orderId}/status`, { status });
+      setOrders(orders.map(order =>
+        order._id === orderId ? { ...order, status } : order
+      ));
+      toast.success('Order status updated');
+    } catch (error) {
+      toast.error('Failed to update order status');
+    }
+  };
+
+  const handleAddFood = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await api.post('/foods', newFood);
+      setFoods([...foods, res.data]);
+      setNewFood({
+        name: '',
+        description: '',
+        price: '',
+        category: '',
+        image: ''
+      });
+      toast.success('Food item added');
+    } catch (error) {
+      toast.error('Failed to add food item');
+    }
+  };
+
+  const handleDeleteFood = async (foodId) => {
+    try {
+      await api.delete(`/foods/${foodId}`);
+      setFoods(foods.filter(food => food._id !== foodId));
+      toast.success('Food item deleted');
+    } catch (error) {
+      toast.error('Failed to delete food item');
+    }
+  };
+
+  return (
+    <div className="max-w-6xl mx-auto">
+      <h2 className="text-2xl font-bold mb-6">Admin Dashboard</h2>
+      
+      <div className="mb-6">
+        <div className="flex space-x-4">
+          <button
+            onClick={() => setActiveTab('orders')}
+            className={`px-4 py-2 rounded ${
+              activeTab === 'orders' ? 'bg-blue-500 text-white' : 'bg-gray-200'
+            }`}
+          >
+            Orders
+          </button>
+          <button
+            onClick={() => setActiveTab('foods')}
+            className={`px-4 py-2 rounded ${
+              activeTab === 'foods' ? 'bg-blue-500 text-white' : 'bg-gray-200'
+            }`}
+          >
+            Foods
+          </button>
+          <button
+            onClick={() => setActiveTab('users')}
+            className={`px-4 py-2 rounded ${
+              activeTab === 'users' ? 'bg-blue-500 text-white' : 'bg-gray-200'
+            }`}
+          >
+            Users
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div>Loading...</div>
+      ) : (
+        <div>
+          {activeTab === 'orders' && (
+            <div className="space-y-4">
+              {orders.map((order) => (
+                <div key={order._id} className="bg-white p-6 rounded shadow">
+                  <div className="flex justify-between items-start mb-4">
+                    <div>
+                      <p>Order ID: {order._id}</p>
+                      <p>Customer: {order.user.name}</p>
+                      <p>Total: ₹{order.totalAmount}</p>
+                    </div>
+                    <select
+                      value={order.status}
+                      onChange={(e) => updateOrderStatus(order._id, e.target.value)}
+                      className="border p-2 rounded"
+                    >
+                      <option value="pending">Pending</option>
+                      <option value="confirmed">Confirmed</option>
+                      <option value="preparing">Preparing</option>
+                      <option value="ready">Ready</option>
+                      <option value="delivered">Delivered</option>
+                      <option value="cancelled">Cancelled</option>
+                    </select>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {activeTab === 'foods' && (
+            <div>
+              <form onSubmit={handleAddFood} className="bg-white p-6 rounded shadow mb-6">
+                <h3 className="text-xl font-bold mb-4">Add New Food Item</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block mb-2">Name</label>
+                    <input
+                      type="text"
+                      className="w-full p-2 border rounded"
+                      value={newFood.name}
+                      onChange={(e) => setNewFood({ ...newFood, name: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block mb-2">Category</label>
+                    <input
+                      type="text"
+                      className="w-full p-2 border rounded"
+                      value={newFood.category}
+                      onChange={(e) => setNewFood({ ...newFood, category: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block mb-2">Price</label>
+                    <input
+                      type="number"
+                      className="w-full p-2 border rounded"
+                      value={newFood.price}
+                      onChange={(e) => setNewFood({ ...newFood, price: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block mb-2">Image URL</label>
+                    <input
+                      type="text"
+                      className="w-full p-2 border rounded"
+                      value={newFood.image}
+                      onChange={(e) => setNewFood({ ...newFood, image: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="block mb-2">Description</label>
+                    <textarea
+                      className="w-full p-2 border rounded"
+                      value={newFood.description}
+                      onChange={(e) => setNewFood({ ...newFood, description: e.target.value })}
+                      required
+                    />
+                  </div>
+                </div>
+                <button
+                  type="submit"
+                  className="mt-4 bg-blue-500 text-white px-6 py-2 rounded hover:bg-blue-600"
+                >
+                  Add Food Item
+                </button>
+              </form>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {/* {foods.map((food) => ( */}
+
+{foods.map((food) => (
+  <div key={food._id} className="bg-white p-4 rounded shadow">
+    <img
+      src={food.image}
+      alt={food.name}
+      className="w-full h-48 object-cover rounded mb-4"
+    />
+    <h3 className="text-xl font-bold mb-2">{food.name}</h3>
+    <p className="text-gray-600 mb-2">{food.description}</p>
+    <p className="font-bold mb-2">₹{food.price}</p>
+    <p className="text-gray-600 mb-4">Category: {food.category}</p>
+    <div className="flex justify-end gap-2">
+      <button
+        onClick={() => handleDeleteFood(food._id)}
+        className="text-red-500 hover:text-red-600"
+      >
+        <FiTrash2 size={20} />
+      </button>
+    </div>
+  </div>
+))}
+</div>
+</div>
+)}
+
+{activeTab === 'users' && (
+<div className="bg-white rounded shadow overflow-x-auto">
+<table className="w-full">
+<thead>
+  <tr className="bg-gray-50">
+    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+      Name
+    </th>
+    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+      Email
+    </th>
+    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+      Phone
+    </th>
+    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+      Role
+    </th>
+    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+      Joined
+    </th>
+  </tr>
+</thead>
+<tbody className="bg-white divide-y divide-gray-200">
+  {users.map((user) => (
+    <tr key={user._id}>
+      <td className="px-6 py-4 whitespace-nowrap">
+        {user.name}
+      </td>
+      <td className="px-6 py-4 whitespace-nowrap">
+        {user.email}
+      </td>
+      <td className="px-6 py-4 whitespace-nowrap">
+        {user.phone}
+      </td>
+      <td className="px-6 py-4 whitespace-nowrap">
+        <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+          user.role === 'admin' ? 'bg-purple-100 text-purple-800' : 'bg-green-100 text-green-800'
+        }`}>
+          {user.role}
+        </span>
+      </td>
+      <td className="px-6 py-4 whitespace-nowrap">
+        {new Date(user.createdAt).toLocaleDateString()}
+      </td>
+    </tr>
+  ))}
+</tbody>
+</table>
+</div>
+)}
+</div>
+)}
+</div>
+);
+};
+
+export default AdminDashboard;
+
+
+
+
+
+
+
+// src/components/PrivateRoute.jsx
+import React from 'react';
+import { Navigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+
+const PrivateRoute = ({ children }) => {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return <div>Loading...</div>;
+  }
+
+  if (!user) {
+    return <Navigate to="/login" />;
+  }
+
+  return children;
+};
+
+export default PrivateRoute;
+
+// src/components/AdminRoute.jsx
+import React from 'react';
+import { Navigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+
+const AdminRoute = ({ children }) => {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return <div>Loading...</div>;
+  }
+
+  if (!user || user.role !== 'admin') {
+    return <Navigate to="/" />;
+  }
+
+  return children;
+};
+
+export default AdminRoute;
+
+// src/pages/Home.jsx
+import React from 'react';
+import { useNavigate } from 'react-router-dom';
+import { FiShoppingBag, FiClock, FiStar } from 'react-icons/fi';
+
+const Home = () => {
+  const navigate = useNavigate();
+
+  const features = [
+    {
+      icon: <FiShoppingBag className="w-6 h-6" />,
+      title: 'Wide Selection',
+      description: 'Choose from our extensive menu of delicious dishes'
+    },
+    {
+      icon: <FiClock className="w-6 h-6" />,
+      title: 'Fast Delivery',
+      description: 'Quick and reliable delivery to your doorstep'
+    },
+    {
+      icon: <FiStar className="w-6 h-6" />,
+      title: 'Best Quality',
+      description: 'Fresh ingredients and expert chefs for the perfect meal'
+    }
+  ];
+
+  const popularDishes = [
+    {
+      name: 'Butter Chicken',
+      image: '/api/placeholder/400/300',
+      price: '₹399'
+    },
+    {
+      name: 'Paneer Tikka',
+      image: '/api/placeholder/400/300',
+      price: '₹299'
+    },
+    {
+      name: 'Biryani',
+      image: '/api/placeholder/400/300',
+      price: '₹349'
+    }
+  ];
+
+  return (
+    <div className="max-w-6xl mx-auto">
+      {/* Hero Section */}
+      <div className="text-center py-16 px-4">
+        <h1 className="text-4xl md:text-5xl font-bold mb-6">
+          Delicious Food Delivered To Your Door
+        </h1>
+        <p className="text-xl text-gray-600 mb-8">
+          Experience the finest cuisine from our kitchen to your table
+        </p>
+        <button
+          onClick={() => navigate('/menu')}
+          className="bg-blue-500 text-white px-8 py-3 rounded-lg text-lg font-semibold hover:bg-blue-600 transition-colors"
+        >
+          Order Now
+        </button>
+      </div>
+
+      {/* Features Section */}
+      <div className="py-16 bg-gray-50">
+        <div className="max-w-5xl mx-auto px-4">
+          <h2 className="text-3xl font-bold text-center mb-12">
+            Why Choose Us
+          </h2>
+          <div className="grid md:grid-cols-3 gap-8">
+            {features.map((feature, index) => (
+              <div
+                key={index}
+                className="text-center p-6 bg-white rounded-lg shadow-sm"
+              >
+                <div className="flex justify-center mb-4 text-blue-500">
+                  {feature.icon}
+                </div>
+                <h3 className="text-xl font-semibold mb-2">
+                  {feature.title}
+                </h3>
+                <p className="text-gray-600">
+                  {feature.description}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Popular Dishes Section */}
+      <div className="py-16 px-4">
+        <h2 className="text-3xl font-bold text-center mb-12">
+          Popular Dishes
+        </h2>
+        <div className="grid md:grid-cols-3 gap-8">
+          {popularDishes.map((dish, index) => (
+            <div
+              key={index}
+              className="bg-white rounded-lg shadow-sm overflow-hidden"
+            >
+              <img
+                src={dish.image}
+                alt={dish.name}
+                className="w-full h-48 object-cover"
+              />
+              <div className="p-4">
+                <h3 className="text-xl font-semibold mb-2">{dish.name}</h3>
+                <p className="text-gray-600">{dish.price}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="text-center mt-8">
+          <button
+            onClick={() => navigate('/menu')}
+            className="bg-blue-500 text-white px-6 py-2 rounded-lg hover:bg-blue-600 transition-colors"
+          >
+            View Full Menu
+          </button>
+        </div>
+      </div>
+
+      {/* About Section */}
+      <div className="py-16 bg-gray-50 px-4">
+        <div className="max-w-3xl mx-auto text-center">
+          <h2 className="text-3xl font-bold mb-6">About Us</h2>
+          <p className="text-gray-600 mb-8">
+            We are passionate about delivering the best dining experience to our customers. 
+            With years of culinary expertise and a commitment to quality, we ensure that 
+            every dish that leaves our kitchen meets our high standards.
+          </p>
+          <p className="text-gray-600">
+            Our team of expert chefs uses only the freshest ingredients to create 
+            mouth-watering dishes that will satisfy your cravings and keep you coming back for more.
+          </p>
+        </div>
+      </div>
+
+      {/* Call to Action */}
+      <div className="text-center py-16 px-4">
+        <h2 className="text-3xl font-bold mb-6">
+          Ready to Order?
+        </h2>
+        <button
+          onClick={() => navigate('/menu')}
+          className="bg-blue-500 text-white px-8 py-3 rounded-lg text-lg font-semibold hover:bg-blue-600 transition-colors"
+        >
+          Browse Our Menu
+        </button>
+      </div>
+    </div>
+  );
+};
+
+export default Home;

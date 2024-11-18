@@ -1,0 +1,27 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+
+*{
+    margin: 0;
+    padding: 0;
+}
+
+.App{
+    width: 100%;
+    
+}
+
+.Menu{
+    padding: 10px;
+}
+
+.AllPage{
+    
+}
+
+.Home{
+    width: 100%;
+    /* border: 1px solid black; */
+}
