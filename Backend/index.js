@@ -1,4 +1,3 @@
-// index.js
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
@@ -6,8 +5,8 @@ import { connectDB } from './db.js';
 import { foodRouter } from './routes/foodRoutes.js';
 import { orderRouter } from './routes/orderRoutes.js';
 import { userRouter } from './routes/userRoutes.js';
-// import { paymentRouter } from './routes/paymentRoutes.js';
 import { searchRouter } from './routes/searchRoutes.js';
+import path from 'path';
 
 const app = express();
 
@@ -15,15 +14,17 @@ const app = express();
 connectDB();
 
 // Middleware
-app.use(cors());
+const allowedOrigins = process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : [];
+app.use(cors({ origin: allowedOrigins }));
 app.use(express.json());
 
-// Routes
-// app.use('/api/payments', paymentRouter);
+// API Routes
 app.use('/api/search', searchRouter);
 app.use('/api/foods', foodRouter);
 app.use('/api/orders', orderRouter);
 app.use('/api/users', userRouter);
+
+
 
 // Error handling middleware
 app.use((err, req, res, next) => {
