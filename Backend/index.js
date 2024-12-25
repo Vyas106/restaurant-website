@@ -14,8 +14,9 @@ const app = express();
 connectDB();
 
 // Middleware
-const allowedOrigins = process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : [];
-app.use(cors({ origin: allowedOrigins }));
+// const allowedOrigins = process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : ['http://localhost:5173'];
+
+app.use(cors());
 app.use(express.json());
 
 // API Routes
